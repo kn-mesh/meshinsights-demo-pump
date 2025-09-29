@@ -7,7 +7,7 @@ health narratives captured in ``Docs/PumpSimulatorSpec.md``:
 * ``IMPELLER_WEAR`` – gradual hydraulic efficiency loss.
 * ``HEALTHY_FP`` – benign process-driven shifts that resemble alerts.
 
-Executing the module (``python -m src.pump_data.pump_simulator``) generates two
+Executing the module (``uv run python -m src.pump_data.pump_simulator``) generates two
 CSV files inside :mod:`src.pump_data`:
 
 ``pump_timeseries.csv``
@@ -239,6 +239,10 @@ def apply_cavitation(
 ) -> Tuple[pd.DataFrame, pd.Timestamp]:
     """Overlay cavitation effects onto a baseline profile."""
 
+    # For deterministic labeling we want the class_start to align with the
+    # simulation start (e.g. 2025-01-01). Keep internal cavitation effects
+    # staggered as before, but return the simulation start as the class start
+    # so downstream consumers see classes starting at the first timestamp.
     cavitation_start_day = int(rng.integers(18, 26))
     cavitation_start = df.index.min() + pd.Timedelta(days=cavitation_start_day)
     active_mask = df["is_active"].to_numpy()
@@ -320,7 +324,9 @@ def apply_cavitation(
             0.0, df.loc[cavitation_mask, "sigma_dP"].to_numpy()
         )
 
-    return df, cavitation_start
+    # Return the simulation start timestamp (index.min()) as the class start
+    # so all devices are reported as starting on the simulation start date.
+    return df, df.index.min()
 
 
 def apply_impeller_wear(

@@ -27,8 +27,7 @@ The simulated dataset must allow us to demonstrate how MeshInsights can outperfo
 ## Classifications (device types)
 
 ### 1. Cavitation
-Previously called “Suction Restriction / Emerging Cavitation.”  
-This is simplified to **Cavitation** for clarity. The device simulates cavitation-like behavior as suction conditions deteriorate.
+The device simulates cavitation-like behavior as suction conditions deteriorate.
 
 - **Narrative:** Pump struggles to pull fluid due to poor suction (plugged strainer, vapor bubbles, etc.).
 - **Data characteristics (90 days):**

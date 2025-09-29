@@ -43,11 +43,11 @@ PUMP_CLASSES = {
 class SimulationConfig:
     """High level configuration for the telemetry simulation."""
 
-    start_timestamp: pd.Timestamp = pd.Timestamp("2024-01-01T00:00:00Z")
+    start_timestamp: pd.Timestamp = pd.Timestamp("2025-01-01T00:00:00Z")
     days: int = 90
     freq_minutes: int = 5
     pump_counts: Dict[str, int] = field(
-        default_factory=lambda: {"cavitation": 1, "impeller_wear": 1, "healthy_fp": 1}
+        default_factory=lambda: {"cavitation": 5, "impeller_wear": 5, "healthy_fp": 5}
     )
     random_seed: int | None = 42
 
@@ -408,11 +408,12 @@ def apply_healthy_epochs(
 
 
 def simulate_single_pump(
-    pump_type: str, index: int, config: SimulationConfig, rng: np.random.Generator
+    pump_type: str, device_id: str, config: SimulationConfig, rng: np.random.Generator
 ) -> PumpSimulationResult:
     """Simulate one pump for the requested class."""
 
-    pump_id = f"{PUMP_CLASSES[pump_type]}_{index + 1:02d}"
+    # Use the supplied device_id (6-digit string) instead of a class-based id
+    pump_id = device_id
     df = build_baseline_profile(pump_id, config, rng)
 
     if pump_type == "cavitation":
@@ -467,9 +468,16 @@ def simulate_pumps(config: SimulationConfig) -> Tuple[pd.DataFrame, pd.DataFrame
     data_frames: List[pd.DataFrame] = []
     label_rows: List[Dict[str, object]] = []
 
+    used_ids: set = set()
     for pump_type, count in config.pump_counts.items():
-        for idx in range(count):
-            result = simulate_single_pump(pump_type, idx, config, rng)
+        for _ in range(count):
+            # generate a unique 6-digit device id using the RNG
+            while True:
+                device_id = f"{rng.integers(0, 1_000_000):06d}"
+                if device_id not in used_ids:
+                    used_ids.add(device_id)
+                    break
+            result = simulate_single_pump(pump_type, device_id, config, rng)
             data_frames.append(result.data)
             label_rows.extend(result.labels)
 
@@ -496,17 +504,17 @@ def parse_args() -> SimulationConfig:
     parser.add_argument(
         "--start",
         type=str,
-        default="2024-01-01T00:00:00Z",
+        default="2025-01-01T00:00:00Z",
         help="UTC start timestamp for the simulation window.",
     )
     parser.add_argument("--freq", type=int, default=5, help="Data cadence in minutes (default: 5)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--cavitation", type=int, default=1, help="Number of cavitation pumps to simulate")
+    parser.add_argument("--cavitation", type=int, default=5, help="Number of cavitation pumps to simulate")
     parser.add_argument(
-        "--impeller-wear", type=int, default=1, help="Number of impeller-wear pumps to simulate"
+        "--impeller-wear", type=int, default=5, help="Number of impeller-wear pumps to simulate"
     )
     parser.add_argument(
-        "--healthy", type=int, default=1, help="Number of healthy/false-positive pumps to simulate"
+        "--healthy", type=int, default=5, help="Number of healthy/false-positive pumps to simulate"
     )
 
     args = parser.parse_args()
@@ -525,10 +533,30 @@ def parse_args() -> SimulationConfig:
     )
 
 
-def main() -> None:
-    """Entry point for CLI usage."""
+def main(
+    fixed_pump_counts: Dict[str, int] | None = None,
+    fixed_seed: int | None = None,
+) -> None:
+    """Entry point for CLI usage.
+
+    The function accepts optional `fixed_pump_counts` and `fixed_seed` values
+    which, when supplied, will override any equivalent options provided on the
+    CLI. This ensures the module can be executed programmatically with a
+    deterministic fleet and RNG seed for reproducibility.
+    """
 
     config = parse_args()
+
+    # If fixed counts are supplied programmatically, enforce them and ignore
+    # any CLI-supplied values for pump counts.
+    if fixed_pump_counts is not None:
+        config.pump_counts = fixed_pump_counts
+
+    # If a fixed seed is supplied programmatically, enforce it so RNGs are
+    # deterministic regardless of CLI flags.
+    if fixed_seed is not None:
+        config.random_seed = fixed_seed
+
     timeseries, labels = simulate_pumps(config)
     ts_path, label_path = write_outputs(timeseries, labels)
     print(f"Wrote telemetry to {ts_path.relative_to(SIM_OUTPUT_DIR.parent)}")
@@ -536,4 +564,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Lock the number of simulated devices per type here so CLI flags cannot
+    # be used to change fleet size at runtime. Also fix the RNG seed for
+    # reproducibility.
+    main({"cavitation": 5, "impeller_wear": 5, "healthy_fp": 5}, fixed_seed=42)

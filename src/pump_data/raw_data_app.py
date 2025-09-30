@@ -38,9 +38,7 @@ def available_metrics(df: pd.DataFrame) -> List[str]:
         "Ps_kPa",
         "Pd_kPa",
         "Q_m3h",
-        "I_A",
-        "dP_kPa",
-        "Eff",
+        "I_A"
     ]
     return [c for c in candidates if c in df.columns]
 
@@ -155,7 +153,7 @@ def main() -> None:
             fig = px.line(pump_df, x=pump_df.index, y=metric, title=f"{metric} — {pump_id}", template="plotly_dark")
             # Provide a distinct key per metric/pump to avoid component collisions
             # when multiple plots exist on the page.
-            col.plotly_chart(fig, width='stretch', key=f"plot-{metric}-{pump_id}")
+            col.plotly_chart(fig, key=f"plot-{metric}-{pump_id}")
 
     for metric in selected_metrics:
         render_metric_fragment(metric, pumps_to_plot)

@@ -450,8 +450,6 @@ def simulate_single_pump(
             "Pd_kPa",
             "Q_m3h",
             "I_A",
-            "dP_kPa",
-            "Eff",
         ]
     ].copy()
 

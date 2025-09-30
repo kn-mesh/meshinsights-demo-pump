@@ -13,7 +13,7 @@ dependencies = [
     "scipy==1.15.3",
     "scikit-learn==1.7.0",
     "diptest==0.9.0",
-    "streamlit==1.49.0",
+    "streamlit==1.50.0",
     "streamlit-authenticator==0.4.2",
     "langchain==0.3.25",
     "langgraph==0.4.2",

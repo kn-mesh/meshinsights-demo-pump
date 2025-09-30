@@ -29,6 +29,10 @@ def load_labels(path: Path) -> pd.DataFrame:
 @st.cache_data
 def load_timeseries(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, parse_dates=["timestamp_utc"]) 
+    if df["timestamp_utc"].dt.tz is None:
+        df["timestamp_utc"] = df["timestamp_utc"].dt.tz_localize("UTC")
+    else:
+        df["timestamp_utc"] = df["timestamp_utc"].dt.tz_convert("UTC")
     df = df.sort_values("timestamp_utc")
     return df
 
@@ -100,6 +104,44 @@ def main() -> None:
         selected_pumps = selected_pumps[:2]
 
     st.sidebar.markdown("---")
+
+    # Let users pick a date window but keep the underlying dataset intact so
+    # future interactions (e.g. different pumps) stay responsive.
+    default_start = pd.Timestamp("2025-01-01", tz="UTC")
+    default_end = pd.Timestamp("2025-01-31", tz="UTC")
+    ts_min = timeseries["timestamp_utc"].min()
+    ts_max = timeseries["timestamp_utc"].max()
+
+    if pd.isna(ts_min) or pd.isna(ts_max):
+        st.error("No telemetry data available to plot.")
+        return
+
+    min_date = ts_min.tz_convert("UTC") if ts_min.tz is not None else ts_min.tz_localize("UTC")
+    max_date = ts_max.tz_convert("UTC") if ts_max.tz is not None else ts_max.tz_localize("UTC")
+
+    start_value = max(default_start, min_date)
+    end_value = min(default_end, max_date)
+
+    date_selection = st.sidebar.date_input(
+        "Date range",
+        value=(start_value.date(), end_value.date()),
+        min_value=min_date.date(),
+        max_value=max_date.date(),
+    )
+
+    if not isinstance(date_selection, (list, tuple)) or len(date_selection) != 2:
+        st.warning("Select both a start and end date.")
+        return
+
+    start_date, end_date = date_selection
+
+    if start_date > end_date:
+        st.warning("Start date must be on or before end date.")
+        return
+
+    filter_start = pd.Timestamp(start_date, tz="UTC")
+    filter_end = pd.Timestamp(end_date, tz="UTC") + pd.Timedelta(days=1)
+
     metrics = available_metrics(timeseries)
     selected_metrics = st.sidebar.multiselect("Metrics to plot", metrics, default=metrics)
 
@@ -149,19 +191,19 @@ def main() -> None:
                 col.info(f"Metric {metric} not available for pump {pump_id}.")
                 continue
 
+            window_df = pump_df.loc[(pump_df.index >= filter_start) & (pump_df.index < filter_end)]
+            if window_df.empty:
+                col.info(f"No data between {start_date} and {end_date} for pump {pump_id}.")
+                continue
+
             # Ensure Plotly uses a dark template to match user preference.
-            fig = px.line(pump_df, x=pump_df.index, y=metric, title=f"{metric} — {pump_id}", template="plotly_dark")
+            fig = px.line(window_df, x=window_df.index, y=metric, title=f"{metric} — {pump_id}", template="plotly_dark")
             # Provide a distinct key per metric/pump to avoid component collisions
             # when multiple plots exist on the page.
-            col.plotly_chart(fig, key=f"plot-{metric}-{pump_id}")
+            col.plotly_chart(fig, key=f"plot-{metric}-{pump_id}", use_container_width=True)
 
     for metric in selected_metrics:
         render_metric_fragment(metric, pumps_to_plot)
-
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Show label record"):
-        rec = labels[labels["pump_id"].astype(str).isin(selected_pumps)]
-        st.sidebar.write(rec)
 
 
 # uv run python -m streamlit run src/pump_data/raw_data_app.py

@@ -28,6 +28,8 @@ from src.core.processor import Processor
 from src.pump_pipeline.pipeline_objects.data_object_pump import PumpPipelineDataObject
 from src.pump_pipeline.stage_io.data_retriever_pump import PumpDataRetriever
 from src.pump_pipeline.stage_io.data_normalizer_pump import PumpDataNormalizer
+from src.pump_pipeline.stage_cpu.processors.calculate_differential_pressure import CalculateDifferentialPressureProcessor
+from src.pump_pipeline.stage_cpu.processors.calculate_efficiency import CalculateEfficiencyProcessor
 
 
 # ==================== Module defaults (to avoid drift) ==================== #
@@ -91,8 +93,10 @@ def create_pump_processors(device: DeviceUnit) -> List[Processor]:
     List[Processor]
         Empty list for now.
     """
-    return []
-
+    return [
+        CalculateDifferentialPressureProcessor(),
+        CalculateEfficiencyProcessor(),
+    ]
 
 # ==================== DataObject factory ==================== #
 
@@ -243,8 +247,9 @@ if __name__ == "__main__":
     from datetime import date as _date
     import json
 
-    DEVICE_ID_1 = "089250"
-    DEVICE_ID_2 = "418496"
+    DEVICE_ID_1 = "089250" # CAVITATION
+    DEVICE_ID_2 = "418496" # IMPELLER_WEAR
+    DEVICE_ID_3 = "923684" # HEALTHY_FP
     START_DATE = _date(2025, 1, 1)
     END_DATE = _date(2025, 3, 31)
 
@@ -253,6 +258,7 @@ if __name__ == "__main__":
     devices = [
         make_pump_device(device_id=DEVICE_ID_1, start_utc=datetime.combine(START_DATE, datetime.min.time()), end_utc=datetime.combine(END_DATE, datetime.max.time())),
         make_pump_device(device_id=DEVICE_ID_2, start_utc=datetime.combine(START_DATE, datetime.min.time()), end_utc=datetime.combine(END_DATE, datetime.max.time())),
+        make_pump_device(device_id=DEVICE_ID_3, start_utc=datetime.combine(START_DATE, datetime.min.time()), end_utc=datetime.combine(END_DATE, datetime.max.time())),
     ]
 
     batch_results = run_pump_batch(
@@ -270,14 +276,25 @@ if __name__ == "__main__":
     print("=" * 50)
 
     for device_id, dobj in batch_results.device_results.items():
-        try:
-            df = dobj.get_dataset("pump_telemetry")
-        except KeyError:
-            print(f"\n[WARN] No normalized dataset for device {device_id}")
-            continue
+        normalized_df = dobj.get_dataset("pump_telemetry")
+        differential_pressure_df = dobj.get_artifact("differential_pressure")
+        efficiency_df = dobj.get_artifact("efficiency")
 
-        print(f"\nDevice {device_id} — normalized rows: {len(df)}, columns: {list(df.columns)}")
+        print("\n" + "=" * 50)
+        print(f"\nDevice: {device_id}")
+        if device_id == DEVICE_ID_1:
+            print("\nCAVITATION")
+        elif device_id == DEVICE_ID_2:
+            print("\nIMPELLER_WEAR")
+        elif device_id == DEVICE_ID_3:
+            print("\nHEALTHY_FP")
         # sort by batch_id
-        df = df.sort_values("batch_id")
-        print(df)
+        normalized_df = normalized_df.sort_values("batch_id")
+        print("\nNormalized DataFrame:")
+        print(normalized_df)
+        print("\nDifferential Pressure DataFrame:")
+        print(differential_pressure_df)
+        print("\nEfficiency DataFrame:")
+        print(efficiency_df)
+        print("=" * 50)
 

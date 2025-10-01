@@ -89,12 +89,18 @@ class PumpPipelineDataObject(PipelineDataObject):
             {
                 "timestamp_utc": pa.Column(pa.DateTime, nullable=False),
                 "dP_kPa": pa.Column(pa.Float, nullable=True),
+                # optional metadata for plotting
+                "batch_id": pa.Column(pa.String, nullable=True),
+                "recipe": pa.Column(pa.String, nullable=True),
             }
         )
         eff_schema = pa.DataFrameSchema(
             {
                 "timestamp_utc": pa.Column(pa.DateTime, nullable=False),
                 "Eff": pa.Column(pa.Float, nullable=True),
+                # optional metadata for plotting
+                "batch_id": pa.Column(pa.String, nullable=True),
+                "recipe": pa.Column(pa.String, nullable=True),
             }
         )
         self.register_artifact_schema(self.ARTIFACT_DIFFERENTIAL_PRESSURE, dp_schema)

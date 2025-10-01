@@ -15,6 +15,10 @@ Simulate 90 days of 5‑minute telemetry for three pump health narratives and ma
   - `I_A` — motor current (A).
   - Tags: `batch_id`, `recipe`.
 
+Tag semantics
+- `batch_id`: Unique identifier of a contiguous production run on a given pump (e.g., `000123_B0042`). Assigned only during scheduled active windows; idle timestamps between/around batches keep an empty `batch_id` by design.
+- `recipe`: Process recipe tied to the batch window. In this demo, it maps to the targeted flow setpoint (`Q_set`) and is encoded like `R65`, `R80`, `R95`. During healthy false‑positive epochs, the recipe is updated to reflect the epoch’s shifted setpoint so stratifying by recipe explains reversible shifts. Idle periods have an empty `recipe`.
+
 Derived KPIs (computed downstream, not in the simulator CSV):
 - `dP_kPa = Pd_kPa − Ps_kPa`
   - **Definition**: differential (pump) head in kilopascals; the hydraulic pressure increase provided by the pump across the suction and discharge ports. Calculated as discharge minus suction pressure.
@@ -118,4 +122,3 @@ Labels per pump:
 - Cavitation: median `Ps_kPa` more negative by ≈ 8–15% from pre‑event; var(`dP_kPa`) ≈ 1.5–2.0× baseline; intermittent Q dips with I spikes present.
 - Impeller Wear: `dP` at `Q_set` ↓ 5–20% over 90 days; variance ~unchanged; current/flow creep matches one of the two modes.
 - Healthy: epoch‑wise shifts visible and reversible; stratification by `recipe` normalizes KPIs; by day 90, overall trend near baseline when recipes cycle.
-

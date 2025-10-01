@@ -15,7 +15,9 @@ class _RecipeTrendResult:
     """Container for per-recipe head trend statistics."""
 
     recipe: str
-    timestamp_utc: pd.Timestamp
+    week_start: pd.Timestamp  # internal sort key
+    as_of_week: str
+    baseline_range: str
     head_trend_slope_pct: float
     baseline_head_kpa: float
     latest_head_kpa: float
@@ -26,8 +28,10 @@ class _RecipeTrendResult:
 
     def as_dict(self) -> Dict[str, Any]:
         return {
+            "_week_start": self.week_start,
             "recipe": self.recipe,
-            "timestamp_utc": self.timestamp_utc,
+            "as_of_week": self.as_of_week,
+            "baseline_range": self.baseline_range,
             "head_trend_slope_pct": self.head_trend_slope_pct,
             "baseline_head_kpa": self.baseline_head_kpa,
             "latest_head_kpa": self.latest_head_kpa,
@@ -98,7 +102,8 @@ class CalculateHeadTrendSlopeProcessor(Processor):
             return data_object
 
         out_df = pd.DataFrame(results)
-        out_df = out_df.sort_values(["recipe", "timestamp_utc"]).reset_index(drop=True)
+        out_df = out_df.sort_values(["recipe", "_week_start"]).reset_index(drop=True)
+        out_df = out_df.drop(columns=["_week_start"], errors="ignore")
         data_object.set_head_trend_slope(out_df)
         return data_object
 
@@ -155,13 +160,20 @@ class CalculateHeadTrendSlopeProcessor(Processor):
         if np.isnan(head_trend_pct) and np.isnan(slope_pct_90):
             return None
 
-        timestamp_utc = latest_row["week_start"]
-        if timestamp_utc.tzinfo is None:
-            timestamp_utc = timestamp_utc.tz_localize("UTC")
+        week_start = latest_row["week_start"]
+        if week_start.tzinfo is None:
+            week_start = week_start.tz_localize("UTC")
+
+        as_of_week = self._format_week_range(week_start)
+        baseline_start = df["timestamp_utc"].min().tz_convert("UTC")
+        baseline_end = baseline_start + pd.Timedelta(days=self.BASELINE_WINDOW_DAYS - 1)
+        baseline_range = self._format_week_range(baseline_start) if self.BASELINE_WINDOW_DAYS == 7 else f"{baseline_start.month}/{baseline_start.day}/{baseline_start.year % 100:02d} - {baseline_end.month}/{baseline_end.day}/{baseline_end.year % 100:02d}"
 
         return _RecipeTrendResult(
             recipe=str(recipe),
-            timestamp_utc=timestamp_utc,
+            week_start=week_start,
+            as_of_week=as_of_week,
+            baseline_range=baseline_range,
             head_trend_slope_pct=head_trend_pct,
             baseline_head_kpa=baseline_head,
             latest_head_kpa=latest_head,
@@ -174,7 +186,8 @@ class CalculateHeadTrendSlopeProcessor(Processor):
     @staticmethod
     def _empty_result() -> pd.DataFrame:
         columns = [
-            "timestamp_utc",
+            "as_of_week",
+            "baseline_range",
             "recipe",
             "head_trend_slope_pct",
             "baseline_head_kpa",
@@ -185,6 +198,16 @@ class CalculateHeadTrendSlopeProcessor(Processor):
             "total_samples",
         ]
         return pd.DataFrame(columns=columns)
+
+    @staticmethod
+    def _format_week_range(week_start_utc: pd.Timestamp) -> str:
+        """Return a human-readable week range like "M/D/YY - M/D/YY" in UTC."""
+        start = week_start_utc.tz_convert("UTC") if week_start_utc.tzinfo is not None else week_start_utc.tz_localize("UTC")
+        end = start + pd.Timedelta(days=6)
+        def fmt(ts: pd.Timestamp) -> str:
+            yy = ts.year % 100
+            return f"{ts.month}/{ts.day}/{yy:02d}"
+        return f"{fmt(start)} - {fmt(end)}"
 
     def _baseline_denominator(self, baseline_head: float) -> float:
         if np.isnan(baseline_head) or not np.isfinite(baseline_head):

@@ -21,7 +21,7 @@ Tag semantics
 
 Derived KPIs (computed downstream, not in the simulator CSV):
 - `dP_kPa = Pd_kPa − Ps_kPa`
-  - **Definition**: differential (pump) head in kilopascals; the hydraulic pressure increase provided by the pump across the suction and discharge ports. Calculated as discharge minus suction pressure.
+  - **Definition**: differential (pump‑added) head expressed as pressure rise in kilopascals. It is the hydraulic pressure increase across the pump: discharge minus suction. For water near 20°C, `1 kPa ≈ 0.102 m` of head; generally, `H = ΔP/(ρ·g)`.
 - `Eff = (Q_m3h · dP_kPa) / I_A`
   - **Definition**: efficiency proxy (unitless) computed as the hydraulic power proxy (flow × differential pressure) divided by electrical current. Note this is a relative proxy used for comparisons and trend detection; downstream systems should convert to consistent power units if absolute efficiency is required.
 

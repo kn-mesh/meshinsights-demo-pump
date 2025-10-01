@@ -6,6 +6,13 @@ Inputs (per row)
 - `timestamp_utc, pump_id, batch_id, recipe, Ps_kPa, Pd_kPa, Q_m3h, I_A`
 - Derived: `dP_kPa = Pd_kPa − Ps_kPa`
 
+## What is "head"?
+- Concept (plain): "Head" is how much energy per unit weight the pump adds to the liquid. It is commonly expressed as an equivalent fluid column height in meters.
+- Formula: `H = ΔP / (ρ·g)` where `ΔP` is the pump pressure rise, `ρ` the fluid density, and `g` gravity. For water near 20°C (`ρ≈1000 kg/m^3`), `1 kPa ≈ 0.102 m` of head (so `10 kPa ≈ 1.02 m`).
+- What we measure here: We record suction and discharge pressures and compute `dP_kPa = Pd_kPa − Ps_kPa`. For constant‑density liquids, `dP_kPa` is directly proportional to head. In this project, we intentionally use `dP_kPa` as a proxy for head to keep calculations simple and unit‑consistent.
+- Practical takeaway: Anywhere this doc says "head," read it as "differential head (via dP)". If you need meters of head, convert with `H[m] ≈ 0.102·dP_kPa` for water, or use `H = ΔP/(ρ·g)` for other fluids.
+- Not modeled here: NPSH (Net Positive Suction Head) and total dynamic head breakdowns (static + friction + velocity) are out of scope; we focus on differential (pump‑added) head via `dP_kPa`.
+
 Scoping choices (simple mode)
 - Stratify by `pump_id` and `recipe`. Idle rows naturally drop because idle has an empty `recipe` in the simulator.
 - Aggregation window: calendar week is the primary unit; use the first 14 days per recipe as the baseline period.

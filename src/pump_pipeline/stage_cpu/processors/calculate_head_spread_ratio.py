@@ -14,9 +14,10 @@ class CalculateHeadSpreadRatioProcessor(Processor):
 
     The processor consumes the ``pump_telemetry`` dataset and produces a
     DataFrame artifact keyed by
-    ``PumpPipelineDataObject.ARTIFACT_HEAD_SPREAD_RATIO``. Output includes the
-    week start timestamp, recipe label, the head-spread ratio relative to the
-    baseline (first 14 days per recipe), and helper columns for diagnostics.
+    ``PumpPipelineDataObject.ARTIFACT_HEAD_SPREAD_RATIO``. Output includes a
+    human-readable ``week`` range string (e.g., "1/1/25 - 1/7/25"), the recipe
+    label, the head-spread ratio relative to the baseline (first 14 days per
+    recipe), and helper columns for diagnostics.
     """
 
     BASELINE_WINDOW_DAYS: int = 14
@@ -60,7 +61,7 @@ class CalculateHeadSpreadRatioProcessor(Processor):
         if df.empty:
             empty = pd.DataFrame(
                 columns=[
-                    "timestamp_utc",
+                    "week",
                     "recipe",
                     "head_spread_ratio",
                     "head_spread_kpa",
@@ -104,9 +105,12 @@ class CalculateHeadSpreadRatioProcessor(Processor):
                         ratio = float(spread) / float(denom)
 
                 timestamp = self._ensure_utc_timestamp(week_start)
+                week_label = self._format_week_range(timestamp)
                 records.append(
                     {
-                        "timestamp_utc": timestamp,
+                        # internal sort key, dropped before publishing
+                        "_week_start": timestamp,
+                        "week": week_label,
                         "recipe": recipe,
                         "head_spread_ratio": ratio,
                         "head_spread_kpa": float(spread) if not pd.isna(spread) else np.nan,
@@ -117,7 +121,9 @@ class CalculateHeadSpreadRatioProcessor(Processor):
 
         result = pd.DataFrame.from_records(records)
         if not result.empty:
-            result = result.sort_values(["recipe", "timestamp_utc"]).reset_index(drop=True)
+            result = result.sort_values(["recipe", "_week_start"]).reset_index(drop=True)
+            # hide internal sort key
+            result = result.drop(columns=["_week_start"], errors="ignore")
 
         data_object.set_artifact(PumpPipelineDataObject.ARTIFACT_HEAD_SPREAD_RATIO, result)
         return data_object
@@ -141,6 +147,23 @@ class CalculateHeadSpreadRatioProcessor(Processor):
         if timestamp.tzinfo is None:
             return timestamp.tz_localize("UTC")
         return timestamp.tz_convert("UTC")
+
+    @staticmethod
+    def _format_week_range(week_start_utc: pd.Timestamp) -> str:
+        """Return a human-readable week range like "M/D/YY - M/D/YY" in UTC.
+
+        Args:
+            week_start_utc (pd.Timestamp): Start of the week (tz-aware UTC).
+
+        Returns:
+            str: Week label string covering 7 days inclusive.
+        """
+        start = CalculateHeadSpreadRatioProcessor._ensure_utc_timestamp(week_start_utc)
+        end = start + pd.Timedelta(days=6)
+        def fmt(ts: pd.Timestamp) -> str:
+            yy = ts.year % 100
+            return f"{ts.month}/{ts.day}/{yy:02d}"
+        return f"{fmt(start)} - {fmt(end)}"
 
 
 __all__ = ["CalculateHeadSpreadRatioProcessor"]

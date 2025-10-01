@@ -22,8 +22,9 @@ class CalculateIntermittentEventRateProcessor(Processor):
     - Express the event rate as ``events / hours_in_week``.
 
     The processor writes a DataFrame artifact keyed by
-    ``PumpPipelineDataObject.ARTIFACT_INTERMITTENT_EVENT_RATE`` with helper
-    columns for downstream interpretation.
+    ``PumpPipelineDataObject.ARTIFACT_INTERMITTENT_EVENT_RATE``. The output
+    includes a human-readable ``week`` range string (e.g., "1/1/25 - 1/7/25")
+    plus helper columns for downstream interpretation.
     """
 
     FLOW_DROP_FACTOR: float = 0.95
@@ -85,9 +86,12 @@ class CalculateIntermittentEventRateProcessor(Processor):
                     event_count = self._count_weekly_events(week_df, flow_threshold, current_threshold)
                     ier = event_count / hours_in_week if hours_in_week > 0 else np.nan
 
+                week_ts = self._ensure_utc_timestamp(week_start)
+                week_label = self._format_week_range(week_ts)
                 records.append(
                     {
-                        "timestamp_utc": self._ensure_utc_timestamp(week_start),
+                        "_week_start": week_ts,
+                        "week": week_label,
                         "recipe": recipe,
                         "intermittent_event_rate": float(ier) if not pd.isna(ier) else np.nan,
                         "event_count": int(event_count),
@@ -96,17 +100,11 @@ class CalculateIntermittentEventRateProcessor(Processor):
                     }
                 )
 
-        output = pd.DataFrame.from_records(records, columns=[
-            "timestamp_utc",
-            "recipe",
-            "intermittent_event_rate",
-            "event_count",
-            "hours_in_week",
-            "sample_count",
-        ])
+        output = pd.DataFrame.from_records(records)
 
         if not output.empty:
-            output = output.sort_values(["recipe", "timestamp_utc"]).reset_index(drop=True)
+            output = output.sort_values(["recipe", "_week_start"]).reset_index(drop=True)
+            output = output.drop(columns=["_week_start"], errors="ignore")
 
         data_object.set_intermittent_event_rate(output)
         return data_object
@@ -155,11 +153,21 @@ class CalculateIntermittentEventRateProcessor(Processor):
         return timestamp.tz_convert("UTC")
 
     @staticmethod
+    def _format_week_range(week_start_utc: pd.Timestamp) -> str:
+        """Return a human-readable week range like "M/D/YY - M/D/YY" in UTC."""
+        start = CalculateIntermittentEventRateProcessor._ensure_utc_timestamp(week_start_utc)
+        end = start + pd.Timedelta(days=6)
+        def fmt(ts: pd.Timestamp) -> str:
+            yy = ts.year % 100
+            return f"{ts.month}/{ts.day}/{yy:02d}"
+        return f"{fmt(start)} - {fmt(end)}"
+
+    @staticmethod
     def _empty_output() -> pd.DataFrame:
         """Return an empty DataFrame with the expected schema."""
         return pd.DataFrame(
             columns=[
-                "timestamp_utc",
+                "week",
                 "recipe",
                 "intermittent_event_rate",
                 "event_count",

@@ -95,7 +95,7 @@ def run_pipeline_for_selection(
         hts = dobj.get_artifact(PumpPipelineDataObject.ARTIFACT_HEAD_TREND_SLOPE)
         ier = dobj.get_artifact(PumpPipelineDataObject.ARTIFACT_INTERMITTENT_EVENT_RATE)
 
-        hsr_df = hsr.copy() if isinstance(hsr, pd.DataFrame) else pd.DataFrame(columns=["timestamp_utc", "recipe", "head_spread_ratio"])
+        hsr_df = hsr.copy() if isinstance(hsr, pd.DataFrame) else pd.DataFrame(columns=["week", "recipe", "head_spread_ratio"])
         hts_df = hts.copy() if isinstance(hts, pd.DataFrame) else pd.DataFrame(columns=["timestamp_utc", "recipe", "head_trend_slope_pct"])
         ier_df = ier.copy() if isinstance(ier, pd.DataFrame) else pd.DataFrame(columns=["timestamp_utc", "recipe", "intermittent_event_rate"])
 
@@ -168,7 +168,7 @@ def main() -> None:
 
     date_selection = st.sidebar.date_input(
         "Date range",
-        value=(pd.Timestamp("2025-03-24", tz="UTC"), pd.Timestamp("2025-03-31", tz="UTC")),
+        value=(pd.Timestamp("2025-03-01", tz="UTC"), pd.Timestamp("2025-03-31", tz="UTC")),
         min_value=pd.Timestamp("2025-01-01", tz="UTC"),
         max_value=pd.Timestamp("2025-03-31", tz="UTC"),
     )
@@ -251,44 +251,21 @@ def main() -> None:
         eff_by_pump[pump_id] = eff_df
 
         hsr_df = pump_result["head_spread_ratio"].copy()
-        if "timestamp_utc" not in hsr_df.columns:
-            hsr_df["timestamp_utc"] = pd.NaT
-        if not hsr_df.empty:
-            hsr_df["timestamp_utc"] = pd.to_datetime(hsr_df["timestamp_utc"], utc=True, errors="coerce")
-            hsr_df = hsr_df.loc[
-                (hsr_df["timestamp_utc"] >= window_start)
-                & (hsr_df["timestamp_utc"] < window_end_exclusive)
-            ].reset_index(drop=True)
+        # No timestamp filtering for HSR; 'week' is a human-readable range
         hsr_by_pump[pump_id] = hsr_df
 
         hts_df = pump_result["head_trend_slope"].copy()
-        if "timestamp_utc" not in hts_df.columns:
-            hts_df["timestamp_utc"] = pd.NaT
-        if not hts_df.empty:
-            hts_df["timestamp_utc"] = pd.to_datetime(hts_df["timestamp_utc"], utc=True, errors="coerce")
-            hts_df = hts_df.loc[
-                (hts_df["timestamp_utc"] >= window_start)
-                & (hts_df["timestamp_utc"] < window_end_exclusive)
-            ].reset_index(drop=True)
+        # No timestamp filtering for HTS; use human-readable 'as_of_week'
         hts_by_pump[pump_id] = hts_df
 
         ier_df = pump_result["intermittent_event_rate"].copy()
-        if "timestamp_utc" not in ier_df.columns:
-            ier_df["timestamp_utc"] = pd.NaT
-        if not ier_df.empty:
-            ier_df["timestamp_utc"] = pd.to_datetime(ier_df["timestamp_utc"], utc=True, errors="coerce")
-            ier_df = ier_df.loc[
-                (ier_df["timestamp_utc"] >= window_start)
-                & (ier_df["timestamp_utc"] < window_end_exclusive)
-            ].reset_index(drop=True)
+        # No timestamp filtering for IER; 'week' is a human-readable range
         ier_by_pump[pump_id] = ier_df
 
 
     # For a single selected pump render full-width plots inside two tabs
     pump_to_plot = selected_pumps[0] if selected_pumps else ""
 
-    # create two tabs: Raw Data (tab 0) and KPIs (tab 1)
-    tab_raw, tab_kpis = st.tabs(["Raw Data", "KPIs"])
 
     @st.fragment
     def render_normalized_metric(metric: str, pump_id: str) -> None:
@@ -316,22 +293,6 @@ def main() -> None:
             use_container_width=True,
             config={"responsive": True},
         )
-
-    # Render normalized metrics and show underlying normalized dataframe in the Raw Data tab
-    with tab_raw:
-        for metric in selected_metrics:
-            render_normalized_metric(metric, pump_to_plot)
-
-        # Show the normalized dataframe for the selected pump
-        if not pump_to_plot:
-            st.info("(no pump selected)")
-        else:
-            df_to_show = normalized_by_pump.get(pump_to_plot)
-            if df_to_show is None or df_to_show.empty:
-                st.info(f"No normalized dataframe available for pump {pump_to_plot}.")
-            else:
-                with st.expander(f"Normalized data — pump {pump_to_plot}"):
-                    st.dataframe(df_to_show.reset_index(drop=True).head(200))
 
     @st.fragment
     def render_artifact(
@@ -375,8 +336,24 @@ def main() -> None:
         with st.expander(f"{title} — pump {pump_id}"):
             st.dataframe(df.head(10))
 
-    # Render artifacts inside the KPIs tab
-    with tab_kpis:
+    tab_time_series, tab_kpis = st.tabs(["Time Series", "KPIs"])
+
+    # Render normalized metrics and show underlying normalized dataframe in the Time Series tab
+    with tab_time_series:
+        for metric in selected_metrics:
+            render_normalized_metric(metric, pump_to_plot)
+
+        # Show the normalized dataframe for the selected pump
+        if not pump_to_plot:
+            st.info("(no pump selected)")
+        else:
+            df_to_show = normalized_by_pump.get(pump_to_plot)
+            if df_to_show is None or df_to_show.empty:
+                st.info(f"No normalized dataframe available for pump {pump_to_plot}.")
+            else:
+                with st.expander(f"Normalized data — pump {pump_to_plot}"):
+                    st.dataframe(df_to_show.reset_index(drop=True).head(200))
+
         render_artifact(
             title="Differential pressure",
             df_map=diff_by_pump,
@@ -393,30 +370,20 @@ def main() -> None:
             plot_key="artifact-eff",
         )
 
-        render_artifact(
-            title="Head spread ratio",
-            df_map=hsr_by_pump,
-            metric="head_spread_ratio",
-            pump_id=pump_to_plot,
-            plot_key="artifact-hsr",
-        )
 
-        render_artifact(
-            title="Head trend slope",
-            df_map=hts_by_pump,
-            metric="head_trend_slope_pct",
-            pump_id=pump_to_plot,
-            plot_key="artifact-hts",
-        )
 
-        render_artifact(
-            title="Intermittent event rate",
-            df_map=ier_by_pump,
-            metric="intermittent_event_rate",
-            pump_id=pump_to_plot,
-            plot_key="artifact-ier",
-        )
+    # Render artifacts inside the KPIs tab
+    with tab_kpis:
 
+        st.write("Head spread ratio")
+        st.dataframe(hsr_by_pump[pump_to_plot])
+
+        st.write("Intermittent event rate")
+        st.dataframe(ier_by_pump[pump_to_plot])
+
+        st.write("Head trend slope")
+        st.dataframe(hts_by_pump[pump_to_plot])
+        
 
 # uv run python -m streamlit run src/pump_pipeline/streamlit_app.py
 if __name__ == "__main__":

@@ -18,10 +18,20 @@ class PumpPipelineDataObject(PipelineDataObject):
     Artifacts
     - ``differential_pressure``: DataFrame with columns ``timestamp_utc`` (datetime, tz-aware) and ``dP_kPa`` (float)
     - ``efficiency``: DataFrame with columns ``timestamp_utc`` (datetime, tz-aware) and ``Eff`` (float)
+    - ``head_spread_ratio``: DataFrame with columns ``timestamp_utc`` (datetime, tz-aware), ``recipe`` (str), and ``head_spread_ratio`` (float)
+    - ``head_trend_slope``: DataFrame summarizing trend metrics per recipe with
+      columns ``timestamp_utc`` (datetime, tz-aware), ``recipe`` (str), and
+      ``head_trend_slope_pct`` (float)
+    - ``intermittent_event_rate``: DataFrame with columns ``timestamp_utc``
+      (datetime, tz-aware), ``recipe`` (str), and ``intermittent_event_rate``
+      (float)
     """
 
     ARTIFACT_DIFFERENTIAL_PRESSURE: str = "differential_pressure"
     ARTIFACT_EFFICIENCY: str = "efficiency"
+    ARTIFACT_HEAD_SPREAD_RATIO: str = "head_spread_ratio"
+    ARTIFACT_HEAD_TREND_SLOPE: str = "head_trend_slope"
+    ARTIFACT_INTERMITTENT_EVENT_RATE: str = "intermittent_event_rate"
 
     def __init__(self, *, pipeline_name: str = "", config: Optional[Dict[str, Any]] = None) -> None:
         """Create a pump-specific data object and register artifact schemas.
@@ -78,6 +88,78 @@ class PumpPipelineDataObject(PipelineDataObject):
         """
         return self.get_artifact(self.ARTIFACT_EFFICIENCY, None)
 
+    def set_head_spread_ratio(self, data: pd.DataFrame) -> "PumpPipelineDataObject":
+        """Store the head-spread ratio time-series artifact.
+
+        Expects a DataFrame with columns ``timestamp_utc``, ``recipe``, and
+        ``head_spread_ratio``.
+
+        Args:
+            data (pd.DataFrame): Head spread ratio features by recipe/week.
+
+        Returns:
+            PumpPipelineDataObject: Self for fluent chaining.
+        """
+        self.set_artifact(self.ARTIFACT_HEAD_SPREAD_RATIO, data)
+        return self
+
+    def get_head_spread_ratio(self) -> Optional[pd.DataFrame]:
+        """Return the stored head-spread ratio artifact, if present.
+
+        Returns:
+            Optional[pd.DataFrame]: DataFrame with columns ``timestamp_utc``,
+            ``recipe``, and ``head_spread_ratio`` or ``None``.
+        """
+        return self.get_artifact(self.ARTIFACT_HEAD_SPREAD_RATIO, None)
+
+    def set_head_trend_slope(self, data: pd.DataFrame) -> "PumpPipelineDataObject":
+        """Store the head trend slope artifact aggregated per recipe.
+
+        Expects a DataFrame with columns ``timestamp_utc``, ``recipe``, and
+        ``head_trend_slope_pct``.
+
+        Args:
+            data (pd.DataFrame): Head trend slope summary per recipe.
+
+        Returns:
+            PumpPipelineDataObject: Self for fluent chaining.
+        """
+        self.set_artifact(self.ARTIFACT_HEAD_TREND_SLOPE, data)
+        return self
+
+    def get_head_trend_slope(self) -> Optional[pd.DataFrame]:
+        """Return the stored head trend slope artifact, if present.
+
+        Returns:
+            Optional[pd.DataFrame]: DataFrame with ``timestamp_utc``, ``recipe``,
+            and ``head_trend_slope_pct`` columns or ``None``.
+        """
+        return self.get_artifact(self.ARTIFACT_HEAD_TREND_SLOPE, None)
+
+    def set_intermittent_event_rate(self, data: pd.DataFrame) -> "PumpPipelineDataObject":
+        """Store the intermittent event rate artifact.
+
+        Expects a DataFrame with columns ``timestamp_utc``, ``recipe``, and
+        ``intermittent_event_rate`` plus diagnostic fields.
+
+        Args:
+            data (pd.DataFrame): Intermittent event rate metrics by recipe/week.
+
+        Returns:
+            PumpPipelineDataObject: Self for fluent chaining.
+        """
+        self.set_artifact(self.ARTIFACT_INTERMITTENT_EVENT_RATE, data)
+        return self
+
+    def get_intermittent_event_rate(self) -> Optional[pd.DataFrame]:
+        """Return the stored intermittent event rate artifact, if present.
+
+        Returns:
+            Optional[pd.DataFrame]: DataFrame with ``timestamp_utc``, ``recipe``,
+            and ``intermittent_event_rate`` columns or ``None``.
+        """
+        return self.get_artifact(self.ARTIFACT_INTERMITTENT_EVENT_RATE, None)
+
     # ===== Internal helpers =====
     def _register_canonical_artifact_schemas(self) -> None:
         """Register Pandera schemas for canonical pump artifacts.
@@ -103,5 +185,41 @@ class PumpPipelineDataObject(PipelineDataObject):
                 "recipe": pa.Column(pa.String, nullable=True),
             }
         )
+        hsr_schema = pa.DataFrameSchema(
+            {
+                "timestamp_utc": pa.Column(pa.DateTime, nullable=False),
+                "recipe": pa.Column(pa.String, nullable=True),
+                "head_spread_ratio": pa.Column(pa.Float, nullable=True),
+                "head_spread_kpa": pa.Column(pa.Float, nullable=True),
+                "baseline_spread_kpa": pa.Column(pa.Float, nullable=True),
+                "sample_count": pa.Column(pa.Int, nullable=True),
+            }
+        )
+        hts_schema = pa.DataFrameSchema(
+            {
+                "timestamp_utc": pa.Column(pa.DateTime, nullable=False),
+                "recipe": pa.Column(pa.String, nullable=True),
+                "head_trend_slope_pct": pa.Column(pa.Float, nullable=True),
+                "baseline_head_kpa": pa.Column(pa.Float, nullable=True),
+                "latest_head_kpa": pa.Column(pa.Float, nullable=True),
+                "ols_slope_pct_90": pa.Column(pa.Float, nullable=True),
+                "weeks_observed": pa.Column(pa.Int, nullable=True),
+                "baseline_sample_count": pa.Column(pa.Int, nullable=True),
+                "total_samples": pa.Column(pa.Int, nullable=True),
+            }
+        )
+        ier_schema = pa.DataFrameSchema(
+            {
+                "timestamp_utc": pa.Column(pa.DateTime, nullable=False),
+                "recipe": pa.Column(pa.String, nullable=True),
+                "intermittent_event_rate": pa.Column(pa.Float, nullable=True),
+                "event_count": pa.Column(pa.Int, nullable=True),
+                "hours_in_week": pa.Column(pa.Float, nullable=True),
+                "sample_count": pa.Column(pa.Int, nullable=True),
+            }
+        )
         self.register_artifact_schema(self.ARTIFACT_DIFFERENTIAL_PRESSURE, dp_schema)
         self.register_artifact_schema(self.ARTIFACT_EFFICIENCY, eff_schema)
+        self.register_artifact_schema(self.ARTIFACT_HEAD_SPREAD_RATIO, hsr_schema)
+        self.register_artifact_schema(self.ARTIFACT_HEAD_TREND_SLOPE, hts_schema)
+        self.register_artifact_schema(self.ARTIFACT_INTERMITTENT_EVENT_RATE, ier_schema)

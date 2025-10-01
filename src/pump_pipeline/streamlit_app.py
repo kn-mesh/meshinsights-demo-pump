@@ -91,10 +91,21 @@ def run_pipeline_for_selection(
         diff_df = diff.copy() if isinstance(diff, pd.DataFrame) else pd.DataFrame(columns=["timestamp_utc", "dP_kPa"])
         eff_df = eff.copy() if isinstance(eff, pd.DataFrame) else pd.DataFrame(columns=["timestamp_utc", "Eff"])
 
+        hsr = dobj.get_artifact(PumpPipelineDataObject.ARTIFACT_HEAD_SPREAD_RATIO)
+        hts = dobj.get_artifact(PumpPipelineDataObject.ARTIFACT_HEAD_TREND_SLOPE)
+        ier = dobj.get_artifact(PumpPipelineDataObject.ARTIFACT_INTERMITTENT_EVENT_RATE)
+
+        hsr_df = hsr.copy() if isinstance(hsr, pd.DataFrame) else pd.DataFrame(columns=["timestamp_utc", "recipe", "head_spread_ratio"])
+        hts_df = hts.copy() if isinstance(hts, pd.DataFrame) else pd.DataFrame(columns=["timestamp_utc", "recipe", "head_trend_slope_pct"])
+        ier_df = ier.copy() if isinstance(ier, pd.DataFrame) else pd.DataFrame(columns=["timestamp_utc", "recipe", "intermittent_event_rate"])
+
         output[str(pump_id)] = {
             "normalized": normalized,
             "differential_pressure": diff_df,
             "efficiency": eff_df,
+            "head_spread_ratio": hsr_df,
+            "head_trend_slope": hts_df,
+            "intermittent_event_rate": ier_df,
             "errors": list(dobj.errors),
             "warnings": list(dobj.warnings),
         }
@@ -231,6 +242,9 @@ def main() -> None:
     normalized_by_pump: Dict[str, pd.DataFrame] = {}
     diff_by_pump: Dict[str, pd.DataFrame] = {}
     eff_by_pump: Dict[str, pd.DataFrame] = {}
+    hsr_by_pump: Dict[str, pd.DataFrame] = {}
+    hts_by_pump: Dict[str, pd.DataFrame] = {}
+    ier_by_pump: Dict[str, pd.DataFrame] = {}
 
     for pump_id in selected_pumps:
         pump_result = results_by_pump.get(pump_id)
@@ -269,6 +283,39 @@ def main() -> None:
                 & (eff_df["timestamp_utc"] < window_end_exclusive)
             ].reset_index(drop=True)
         eff_by_pump[pump_id] = eff_df
+
+        hsr_df = pump_result["head_spread_ratio"].copy()
+        if "timestamp_utc" not in hsr_df.columns:
+            hsr_df["timestamp_utc"] = pd.NaT
+        if not hsr_df.empty:
+            hsr_df["timestamp_utc"] = pd.to_datetime(hsr_df["timestamp_utc"], utc=True, errors="coerce")
+            hsr_df = hsr_df.loc[
+                (hsr_df["timestamp_utc"] >= window_start)
+                & (hsr_df["timestamp_utc"] < window_end_exclusive)
+            ].reset_index(drop=True)
+        hsr_by_pump[pump_id] = hsr_df
+
+        hts_df = pump_result["head_trend_slope"].copy()
+        if "timestamp_utc" not in hts_df.columns:
+            hts_df["timestamp_utc"] = pd.NaT
+        if not hts_df.empty:
+            hts_df["timestamp_utc"] = pd.to_datetime(hts_df["timestamp_utc"], utc=True, errors="coerce")
+            hts_df = hts_df.loc[
+                (hts_df["timestamp_utc"] >= window_start)
+                & (hts_df["timestamp_utc"] < window_end_exclusive)
+            ].reset_index(drop=True)
+        hts_by_pump[pump_id] = hts_df
+
+        ier_df = pump_result["intermittent_event_rate"].copy()
+        if "timestamp_utc" not in ier_df.columns:
+            ier_df["timestamp_utc"] = pd.NaT
+        if not ier_df.empty:
+            ier_df["timestamp_utc"] = pd.to_datetime(ier_df["timestamp_utc"], utc=True, errors="coerce")
+            ier_df = ier_df.loc[
+                (ier_df["timestamp_utc"] >= window_start)
+                & (ier_df["timestamp_utc"] < window_end_exclusive)
+            ].reset_index(drop=True)
+        ier_by_pump[pump_id] = ier_df
 
 
     # For a single selected pump render full-width plots
@@ -364,6 +411,30 @@ def main() -> None:
         metric="Eff",
         pump_id=pump_to_plot,
         plot_key="artifact-eff",
+    )
+
+    render_artifact(
+        title="Head spread ratio",
+        df_map=hsr_by_pump,
+        metric="head_spread_ratio",
+        pump_id=pump_to_plot,
+        plot_key="artifact-hsr",
+    )
+
+    render_artifact(
+        title="Head trend slope",
+        df_map=hts_by_pump,
+        metric="head_trend_slope_pct",
+        pump_id=pump_to_plot,
+        plot_key="artifact-hts",
+    )
+
+    render_artifact(
+        title="Intermittent event rate",
+        df_map=ier_by_pump,
+        metric="intermittent_event_rate",
+        pump_id=pump_to_plot,
+        plot_key="artifact-ier",
     )
 
 

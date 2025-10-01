@@ -30,6 +30,10 @@ from src.pump_pipeline.stage_io.data_retriever_pump import PumpDataRetriever
 from src.pump_pipeline.stage_io.data_normalizer_pump import PumpDataNormalizer
 from src.pump_pipeline.stage_cpu.processors.calculate_differential_pressure import CalculateDifferentialPressureProcessor
 from src.pump_pipeline.stage_cpu.processors.calculate_efficiency import CalculateEfficiencyProcessor
+from src.pump_pipeline.stage_cpu.processors.calculate_head_spread_ratio import CalculateHeadSpreadRatioProcessor
+from src.pump_pipeline.stage_cpu.processors.calculate_head_trend_slope import CalculateHeadTrendSlopeProcessor
+from src.pump_pipeline.stage_cpu.processors.calculate_intermittent_event_rate import CalculateIntermittentEventRateProcessor
+
 
 
 # ==================== Module defaults (to avoid drift) ==================== #
@@ -84,18 +88,21 @@ def create_pump_normalizers(device: DeviceUnit) -> Dict[str, DataNormalizer]:
 def create_pump_processors(device: DeviceUnit) -> List[Processor]:
     """Create the ordered list of pump processors for a specific device.
 
-    Processors are intentionally stubbed out for the demo; when processors like
-    `CalculateDifferentialPressure` and `CalculateEfficiency` are implemented,
-    add them here in the desired order.
+    Processors execute in sequence on the per-device ``PumpPipelineDataObject``
+    and populate canonical artifacts such as differential pressure, efficiency,
+    cavitation head metrics, and intermittent event rates.
 
     Returns
     -------
     List[Processor]
-        Empty list for now.
+        Ordered processor chain for CPU stage analytics.
     """
     return [
         CalculateDifferentialPressureProcessor(),
         CalculateEfficiencyProcessor(),
+        CalculateHeadSpreadRatioProcessor(),
+        CalculateHeadTrendSlopeProcessor(),
+        CalculateIntermittentEventRateProcessor(),
     ]
 
 # ==================== DataObject factory ==================== #
@@ -279,6 +286,9 @@ if __name__ == "__main__":
         normalized_df = dobj.get_dataset("pump_telemetry")
         differential_pressure_df = dobj.get_artifact("differential_pressure")
         efficiency_df = dobj.get_artifact("efficiency")
+        head_spread_ratio_df = dobj.get_artifact("head_spread_ratio")
+        head_trend_slope_df = dobj.get_artifact("head_trend_slope")
+        intermittent_event_rate_df = dobj.get_artifact("intermittent_event_rate")
 
         print("\n" + "=" * 50)
         print(f"\nDevice: {device_id}")
@@ -296,5 +306,10 @@ if __name__ == "__main__":
         print(differential_pressure_df)
         print("\nEfficiency DataFrame:")
         print(efficiency_df)
+        print("\nHead Spread Ratio DataFrame:")
+        print(head_spread_ratio_df)
+        print("\nHead Trend Slope DataFrame:")
+        print(head_trend_slope_df)
+        print("\nIntermittent Event Rate DataFrame:")
+        print(intermittent_event_rate_df)
         print("=" * 50)
-

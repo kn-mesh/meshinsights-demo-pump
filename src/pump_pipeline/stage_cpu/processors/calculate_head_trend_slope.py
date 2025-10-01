@@ -114,9 +114,10 @@ class CalculateHeadTrendSlopeProcessor(Processor):
         baseline_head = float(baseline["dP_kPa"].median(skipna=True))
         baseline_samples = int(baseline["dP_kPa"].notna().sum())
 
+        # Compute week start (Monday) without converting to PeriodArray which drops timezone
         weekly = (
             df.assign(
-                week_start=df["timestamp_utc"].dt.to_period("W-MON").dt.start_time.dt.tz_localize("UTC")
+                week_start=(df["timestamp_utc"] - pd.to_timedelta(df["timestamp_utc"].dt.weekday, unit="d")).dt.normalize()
             )
             .groupby("week_start", as_index=False)
             .agg(

@@ -112,32 +112,6 @@ def run_pipeline_for_selection(
 
     return output
 
-
-def _derive_date_bounds(labels: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp]:
-    start_candidates = labels.get("class_start_utc")
-    end_candidates = labels.get("class_end_utc")
-
-    ts_min = start_candidates.min() if start_candidates is not None else pd.NaT
-    ts_max = end_candidates.max() if end_candidates is not None else pd.NaT
-
-    if pd.isna(ts_min):
-        ts_min = pd.Timestamp("2025-01-01", tz="UTC")
-    if pd.isna(ts_max):
-        ts_max = pd.Timestamp("2025-03-31", tz="UTC")
-
-    if ts_min.tzinfo is None:
-        ts_min = ts_min.tz_localize("UTC")
-    else:
-        ts_min = ts_min.tz_convert("UTC")
-
-    if ts_max.tzinfo is None:
-        ts_max = ts_max.tz_localize("UTC")
-    else:
-        ts_max = ts_max.tz_convert("UTC")
-
-    return ts_min, ts_max
-
-
 def _ensure_timezone(ts: pd.Timestamp) -> pd.Timestamp:
     if ts.tzinfo is None:
         return ts.tz_localize("UTC")
@@ -153,7 +127,9 @@ def main() -> None:
     st.title("Pump pipeline explorer")
 
     labels = load_labels(LABELS_PATH)
-    ts_min, ts_max = _derive_date_bounds(labels)
+
+    ts_min = pd.Timestamp("2025-01-01", tz="UTC")
+
 
     st.sidebar.header("Data selection")
     labels_display = labels.copy()
@@ -190,14 +166,11 @@ def main() -> None:
 
     st.sidebar.markdown("---")
 
-    default_start = ts_min
-    default_end = min(ts_min + pd.Timedelta(days=30), ts_max)
-
     date_selection = st.sidebar.date_input(
         "Date range",
-        value=(default_start.date(), default_end.date()),
-        min_value=_to_date(ts_min),
-        max_value=_to_date(ts_max),
+        value=(pd.Timestamp("2025-03-24", tz="UTC"), pd.Timestamp("2025-03-31", tz="UTC")),
+        min_value=pd.Timestamp("2025-01-01", tz="UTC"),
+        max_value=pd.Timestamp("2025-03-31", tz="UTC"),
     )
 
     if not isinstance(date_selection, (list, tuple)) or len(date_selection) != 2:
@@ -211,15 +184,8 @@ def main() -> None:
         return
 
     st.sidebar.markdown("---")
-    selected_metrics = st.sidebar.multiselect(
-        "Normalized metrics to plot",
-        options=NORMALIZED_METRICS,
-        default=DEFAULT_METRICS,
-    )
-
-    if not selected_metrics:
-        st.warning("Choose at least one metric to plot.")
-        return
+    # Always plot all normalized metrics (user selection removed)
+    selected_metrics = NORMALIZED_METRICS
 
     if not selected_pumps:
         st.info("No pumps selected. Choose pumps in the table to begin.")
@@ -318,8 +284,11 @@ def main() -> None:
         ier_by_pump[pump_id] = ier_df
 
 
-    # For a single selected pump render full-width plots
+    # For a single selected pump render full-width plots inside two tabs
     pump_to_plot = selected_pumps[0] if selected_pumps else ""
+
+    # create two tabs: Raw Data (tab 0) and KPIs (tab 1)
+    tab_raw, tab_kpis = st.tabs(["Raw Data", "KPIs"])
 
     @st.fragment
     def render_normalized_metric(metric: str, pump_id: str) -> None:
@@ -348,11 +317,21 @@ def main() -> None:
             config={"responsive": True},
         )
 
-    for metric in selected_metrics:
-        render_normalized_metric(metric, pump_to_plot)
+    # Render normalized metrics and show underlying normalized dataframe in the Raw Data tab
+    with tab_raw:
+        for metric in selected_metrics:
+            render_normalized_metric(metric, pump_to_plot)
 
-    st.markdown("---")
-    st.subheader("Derived artifacts")
+        # Show the normalized dataframe for the selected pump
+        if not pump_to_plot:
+            st.info("(no pump selected)")
+        else:
+            df_to_show = normalized_by_pump.get(pump_to_plot)
+            if df_to_show is None or df_to_show.empty:
+                st.info(f"No normalized dataframe available for pump {pump_to_plot}.")
+            else:
+                with st.expander(f"Normalized data — pump {pump_to_plot}"):
+                    st.dataframe(df_to_show.reset_index(drop=True).head(200))
 
     @st.fragment
     def render_artifact(
@@ -362,7 +341,6 @@ def main() -> None:
         pump_id: str,
         plot_key: str,
     ) -> None:
-        st.markdown(f"**{title}**")
         if not pump_id:
             st.info("(no pump selected)")
             return
@@ -397,45 +375,47 @@ def main() -> None:
         with st.expander(f"{title} — pump {pump_id}"):
             st.dataframe(df.head(10))
 
-    render_artifact(
-        title="Differential pressure",
-        df_map=diff_by_pump,
-        metric="dP_kPa",
-        pump_id=pump_to_plot,
-        plot_key="artifact-dp",
-    )
+    # Render artifacts inside the KPIs tab
+    with tab_kpis:
+        render_artifact(
+            title="Differential pressure",
+            df_map=diff_by_pump,
+            metric="dP_kPa",
+            pump_id=pump_to_plot,
+            plot_key="artifact-dp",
+        )
 
-    render_artifact(
-        title="Efficiency",
-        df_map=eff_by_pump,
-        metric="Eff",
-        pump_id=pump_to_plot,
-        plot_key="artifact-eff",
-    )
+        render_artifact(
+            title="Efficiency",
+            df_map=eff_by_pump,
+            metric="Eff",
+            pump_id=pump_to_plot,
+            plot_key="artifact-eff",
+        )
 
-    render_artifact(
-        title="Head spread ratio",
-        df_map=hsr_by_pump,
-        metric="head_spread_ratio",
-        pump_id=pump_to_plot,
-        plot_key="artifact-hsr",
-    )
+        render_artifact(
+            title="Head spread ratio",
+            df_map=hsr_by_pump,
+            metric="head_spread_ratio",
+            pump_id=pump_to_plot,
+            plot_key="artifact-hsr",
+        )
 
-    render_artifact(
-        title="Head trend slope",
-        df_map=hts_by_pump,
-        metric="head_trend_slope_pct",
-        pump_id=pump_to_plot,
-        plot_key="artifact-hts",
-    )
+        render_artifact(
+            title="Head trend slope",
+            df_map=hts_by_pump,
+            metric="head_trend_slope_pct",
+            pump_id=pump_to_plot,
+            plot_key="artifact-hts",
+        )
 
-    render_artifact(
-        title="Intermittent event rate",
-        df_map=ier_by_pump,
-        metric="intermittent_event_rate",
-        pump_id=pump_to_plot,
-        plot_key="artifact-ier",
-    )
+        render_artifact(
+            title="Intermittent event rate",
+            df_map=ier_by_pump,
+            metric="intermittent_event_rate",
+            pump_id=pump_to_plot,
+            plot_key="artifact-ier",
+        )
 
 
 # uv run python -m streamlit run src/pump_pipeline/streamlit_app.py

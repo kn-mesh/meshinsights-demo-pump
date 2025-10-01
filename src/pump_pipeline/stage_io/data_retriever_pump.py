@@ -25,6 +25,8 @@ from typing import Dict, Optional, Any
 import pandas as pd
 
 from src.core.data_source import DataSource
+from src.core.plugins.data_access.data_access_plugin_core import PluginManager
+from src.core.plugins.data_access.implementations.local_file_plugin import LocalFileConnector
 
 
 def _resolve_default_dataset() -> Path:
@@ -85,6 +87,10 @@ class PumpDataRetriever(DataSource):
     ) -> None:
         if not pump_id:
             raise ValueError("PumpDataRetriever requires a non-empty pump_id")
+
+        # Ensure local_file plugin is registered (idempotent guard)
+        if "local_file" not in PluginManager.list_plugins():
+            PluginManager.register_plugin("local_file", LocalFileConnector)
 
         dataset_path = Path(file_path) if file_path is not None else _resolve_default_dataset()
         dataset_path = dataset_path.expanduser().resolve()
@@ -167,3 +173,18 @@ class PumpDataRetriever(DataSource):
         df = df.reset_index(drop=True)
         self.config["retrieved_rows"] = len(df)
         return df
+
+# uv run python -m src.pump_pipeline.stage_io.data_retriever_pump
+if __name__ == "__main__":
+
+    import logging
+    from datetime import date
+
+    logging.basicConfig(level=logging.WARNING)
+
+    SAMPLE_PUMP_ID = "089250"
+    dr = PumpDataRetriever(pump_id=SAMPLE_PUMP_ID)
+    df = dr.fetch()
+    print(f"Retrieved rows for pump {SAMPLE_PUMP_ID}: {len(df)}")
+    if not df.empty:
+        print(df.head(10).to_string(index=False))

@@ -1,4 +1,7 @@
-"""Synthetic telemetry generator for centrifugal pump health scenarios.
+"""
+To run: uv run python -m src.pump_data.pump_simulator
+
+Synthetic telemetry generator for centrifugal pump health scenarios.
 
 This module builds 5-minute telemetry covering multiple months for three pump
 health narratives captured in ``Docs/PumpSimulatorSpec.md``:
@@ -7,8 +10,7 @@ health narratives captured in ``Docs/PumpSimulatorSpec.md``:
 * ``IMPELLER_WEAR`` – gradual hydraulic efficiency loss.
 * ``HEALTHY_FP`` – benign process-driven shifts that resemble alerts.
 
-Executing the module (``uv run python -m src.pump_data.pump_simulator``) generates two
-CSV files inside :mod:`src.pump_data`:
+Executing the module generates two CSV files inside `src.pump_data`:
 
 ``pump_timeseries.csv``
     All simulated 5-minute telemetry with derived KPIs per pump.
@@ -185,7 +187,7 @@ def build_baseline_profile(
         )
     if idle_idx.size:
         q_values[idle_idx] = ensure_non_negative(
-            rng.normal(loc=0.3, scale=0.2, size=idle_idx.size)
+            rng.normal(loc=0.05, scale=0.05, size=idle_idx.size)
         )
     df["Q_m3h"] = q_values
 
@@ -224,7 +226,7 @@ def build_baseline_profile(
         ) / eff_targets[active_idx]
     if idle_idx.size:
         i_values[idle_idx] = ensure_non_negative(
-            rng.normal(loc=2.0, scale=1.0, size=idle_idx.size)
+            rng.normal(loc=0.1, scale=0.08, size=idle_idx.size)
         )
     df["I_A"] = i_values
 
@@ -249,6 +251,8 @@ def apply_cavitation(
     cavitation_mask = active_mask & (df.index >= cavitation_start)
 
     if cavitation_mask.any():
+        baseline_dp_profile = df.loc[cavitation_mask, "dP_expected"].to_numpy(copy=True)
+
         elapsed_days = (
             (df.index[cavitation_mask] - cavitation_start) / np.timedelta64(1, "D")
         ).astype(float)
@@ -256,6 +260,7 @@ def apply_cavitation(
         progress = elapsed_days / max(elapsed_days.max(), 1.0)
         elapsed_series = pd.Series(elapsed_days, index=df.index[cavitation_mask])
         progress_series = pd.Series(progress, index=df.index[cavitation_mask])
+        progress_values = progress_series.to_numpy()
 
         baseline_mask = active_mask & (df.index < cavitation_start)
         ps_baseline = float(
@@ -282,18 +287,19 @@ def apply_cavitation(
             1.0,
         )
 
-        dp_decline = rng.uniform(0.08, 0.15)
+        target_decline = rng.uniform(0.08, 0.15)
+        minimum_decline = max(target_decline - 0.04, 0.05)
 
-        chronic_flow_loss = rng.uniform(0.02, 0.05)
+        chronic_flow_loss = rng.uniform(0.01, 0.03)
         df.loc[cavitation_mask, "Q_m3h"] = ensure_non_negative(
             df.loc[cavitation_mask, "Q_m3h"].to_numpy()
-            * (1.0 - chronic_flow_loss * progress_series.to_numpy())
+            * (1.0 - chronic_flow_loss * progress_values)
         )
 
-        current_increase = rng.uniform(0.10, 0.18)
+        current_increase = rng.uniform(0.08, 0.15)
         df.loc[cavitation_mask, "I_A"] = (
             df.loc[cavitation_mask, "I_A"].to_numpy()
-            * (1.0 + current_increase * progress_series.to_numpy())
+            * (1.0 + current_increase * progress_values)
         )
 
         cavitation_indices = np.where(cavitation_mask)[0]
@@ -318,7 +324,10 @@ def apply_cavitation(
             )
         df.loc[~df["is_active"], "dP_expected"] = 0.0
 
-        df.loc[cavitation_mask, "dP_expected"] *= 1.0 - dp_decline * progress_series
+        flow_adjusted_dp = df.loc[cavitation_mask, "dP_expected"].to_numpy()
+        lower_bound = baseline_dp_profile * (1.0 - target_decline * progress_values)
+        upper_bound = baseline_dp_profile * (1.0 - minimum_decline * progress_values)
+        df.loc[cavitation_mask, "dP_expected"] = np.clip(flow_adjusted_dp, lower_bound, upper_bound)
 
         df.loc[cavitation_mask, "dP_kPa"] = df.loc[cavitation_mask, "dP_expected"] + rng.normal(
             0.0, df.loc[cavitation_mask, "sigma_dP"].to_numpy()
@@ -339,22 +348,38 @@ def apply_impeller_wear(
     progress = (df.index - df.index.min()) / np.timedelta64(1, "D")
     progress = np.clip(progress / config.days, 0.0, 1.0)
 
-    flow_drop = rng.uniform(0.02, 0.10)
-    df.loc[active_mask, "Q_m3h"] *= 1.0 - flow_drop * progress[active_mask]
-
     if active_mask.any():
+        baseline_dp = df.loc[active_mask, "dP_expected"].to_numpy(copy=True)
+        baseline_flow = df.loc[active_mask, "Q_m3h"].to_numpy(copy=True)
+
+        flow_drop = 0.0
+        if rng.random() < 0.6:
+            flow_drop = rng.uniform(0.02, 0.08)
+        df.loc[active_mask, "Q_m3h"] = baseline_flow * (1.0 - flow_drop * progress[active_mask])
+
         df.loc[active_mask, "dP_expected"] = dP_expected_from_flow(
             df.loc[active_mask, "Q_m3h"].to_numpy()
         )
-        decline_pct = rng.uniform(0.05, 0.20)
-        df.loc[active_mask, "dP_expected"] *= 1.0 - decline_pct * progress[active_mask]
+
+        decline_target = rng.uniform(0.05, 0.20)
+        minimum_decline = max(decline_target - 0.04, 0.04)
+        current_dp = df.loc[active_mask, "dP_expected"].to_numpy()
+        lower_bound = baseline_dp * (1.0 - decline_target * progress[active_mask])
+        upper_bound = baseline_dp * (1.0 - minimum_decline * progress[active_mask])
+        df.loc[active_mask, "dP_expected"] = np.clip(current_dp, lower_bound, upper_bound)
+
         df.loc[active_mask, "sigma_dP"] = baseline_sigma
         df.loc[active_mask, "dP_kPa"] = df.loc[active_mask, "dP_expected"] + rng.normal(
             0.0, baseline_sigma
         )
 
-        current_increase = rng.uniform(0.05, 0.10)
-        df.loc[active_mask, "I_A"] *= 1.0 + current_increase * progress[active_mask]
+        if flow_drop == 0.0:
+            current_increase = rng.uniform(0.05, 0.10)
+        else:
+            current_increase = rng.uniform(0.02, 0.06)
+        df.loc[active_mask, "I_A"] = df.loc[active_mask, "I_A"].to_numpy() * (
+            1.0 + current_increase * progress[active_mask]
+        )
 
     df.loc[~df["is_active"], "dP_expected"] = 0.0
 
@@ -368,12 +393,16 @@ def apply_healthy_epochs(
 
     day = 0
     active_mask = df["is_active"].to_numpy()
+    baseline_q_set = df["Q_set_m3h"].to_numpy(copy=True)
+    baseline_flow = df["Q_m3h"].to_numpy(copy=True)
     while day < config.days:
         span_days = int(min(rng.integers(7, 15), config.days - day))
         start = df.index.min() + pd.Timedelta(days=day)
         end = start + pd.Timedelta(days=span_days)
         mask = active_mask & (df.index >= start) & (df.index < end)
         if mask.any():
+            mask_idx = np.where(mask)[0]
+
             q_shift = rng.uniform(0.05, 0.10)
             if rng.random() < 0.5:
                 q_shift *= -1
@@ -381,8 +410,12 @@ def apply_healthy_epochs(
             if rng.random() < 0.5:
                 dp_shift *= -1
 
-            df.loc[mask, "Q_m3h"] *= 1.0 + q_shift
-            df.loc[mask, "Q_set_m3h"] *= 1.0 + q_shift
+            updated_q_set = baseline_q_set[mask_idx] * (1.0 + q_shift)
+            updated_flow = ensure_non_negative(
+                baseline_flow[mask_idx] * (1.0 + q_shift)
+            )
+            df.iloc[mask_idx, df.columns.get_loc("Q_set_m3h")] = updated_q_set
+            df.iloc[mask_idx, df.columns.get_loc("Q_m3h")] = updated_flow
 
             df.loc[mask, "dP_expected"] = dP_expected_from_flow(
                 df.loc[mask, "Q_m3h"].to_numpy()
@@ -406,6 +439,9 @@ def apply_healthy_epochs(
             df.loc[mask, "I_A"] = (
                 df.loc[mask, "Q_m3h"] * df.loc[mask, "dP_kPa"]
             ) / eff_targets
+
+            epoch_recipe = f"R{int(round(np.clip(updated_q_set.mean(), 1.0, 200.0)))}"
+            df.loc[mask, "recipe"] = epoch_recipe
 
         day += span_days
 

@@ -1,108 +1,121 @@
 # OEM Pump Demo Simulation Specification
 
 ## Goal
-Simulate **90 days of telemetry data** (data every 5 minutes) using **Python** for **three types of devices**, each type corresponding to one of the three classification categories below.  
-The simulated dataset must allow us to demonstrate how MeshInsights can outperform traditional alarm engines by classifying machine states more accurately and triggering precise actions.
+Simulate 90 days of 5‑minute telemetry for three pump health narratives and make their signatures easy for experts to recognize in time‑series and operating‑map plots. The simulator emits raw signals only; downstream pipelines compute derived KPIs.
 
 ---
 
-## Use case
-- **Asset:** End-suction centrifugal pump moving solvent from storage to reactor (chemical batch transfer; throttled discharge control).
-- **Cadence:** 5-minute rollups for **90 days**.
-- **Signals (raw & derived):**
-  - `Ps_kPa` (suction pressure, kPa; reference ~0 = atmosphere; more negative = worse suction).
-  - `Pd_kPa` (discharge pressure, kPa).
-  - `Q_m3h` (flow, m³/h).
-  - `I_A` (motor current, A).
-  - **Derived:** `dP_kPa = Pd_kPa - Ps_kPa`; **efficiency proxy** `Eff = (Q_m3h * dP_kPa) / I_A`.
-  - Optional tags: `batch_id`, `recipe`, `valve_pos_pct`, `site_temp_C`.
+## Use Case
+- Asset: End‑suction centrifugal pump moving solvent (batch transfer; throttled discharge control).
+- Cadence: 5‑minute samples for 90 days.
+- Raw signals in CSV:
+  - `Ps_kPa` — suction pressure (kPa). Reference ≈ 0 kPa (atmosphere). More negative ⇒ worse suction.
+  - `Pd_kPa` — discharge pressure (kPa).
+  - `Q_m3h` — flow (m³/h).
+  - `I_A` — motor current (A).
+  - Tags: `batch_id`, `recipe`.
 
-- **Operating pattern:**
-  - 2–4 batches/day; each batch runs 2–6 hours.
-  - During a batch, the control loop targets a flow setpoint `Q_set` (varies by recipe: e.g., 65, 80, 95 m³/h).
-  - Off-shift = pump mostly idle (zero or tiny recirculation flow).
+Derived KPIs (computed downstream, not in the simulator CSV):
+- `dP_kPa = Pd_kPa − Ps_kPa`
+  - **Definition**: differential (pump) head in kilopascals; the hydraulic pressure increase provided by the pump across the suction and discharge ports. Calculated as discharge minus suction pressure.
+- `Eff = (Q_m3h · dP_kPa) / I_A`
+  - **Definition**: efficiency proxy (unitless) computed as the hydraulic power proxy (flow × differential pressure) divided by electrical current. Note this is a relative proxy used for comparisons and trend detection; downstream systems should convert to consistent power units if absolute efficiency is required.
 
----
-
-## Classifications (device types)
-
-### 1. Cavitation
-The device simulates cavitation-like behavior as suction conditions deteriorate.
-
-- **Narrative:** Pump struggles to pull fluid due to poor suction (plugged strainer, vapor bubbles, etc.).
-- **Data characteristics (90 days):**
-  - `Ps_kPa`: downward drift during active hours (median −8–15% vs baseline over 4–6 weeks).
-  - `dP_kPa`: declining median; **variance increases** (p95–p05 band 1.5–2× baseline).
-  - `Q_m3h`: short dips (5–15 min) at same `Q_set`.
-  - `I_A`: p95 increases; spikes when Q dips.
-- **Operating map (Q vs dP):** cloud shifts left/down and widens.
-- **Weekly rollups:** median(Ps) ↓; var(dP) ↑; I/Q ↑ 10–20%.
-
-### 2. Impeller Wear / Hydraulic Efficiency Loss
-- **Narrative:** Impeller wears down over time; smooth, monotonic efficiency decline.
-- **Data characteristics (90 days):**
-  - `Ps_kPa`: stable.
-  - `Pd_kPa`: gradual decline (−0.5 to −1.5 kPa/week).
-  - `dP_kPa`: 5–20% drop over 90 days; variance unchanged.
-  - `Q_m3h`: slightly lower (2–10%) or flat while I_A creeps up (5–10%).
-- **Operating map (Q vs dP):** cloud shifts downward parallel to OEM band.
-- **Weekly rollups:** dP@Q_set ↓ steadily; Eff ↓ 10–25%.
-
-### 3. Healthy (False Positive – Process/Control)
-- **Narrative:** Apparent anomalies caused by recipe/ambient changes, not faults.
-- **Data characteristics (90 days):**
-  - Epochal shifts tied to recipe or ambient changes.
-  - No monotonic decline; values revert when recipe returns.
-  - `I_A` tracks load; ratios normalize when stratified by recipe.
-- **Operating map (Q vs dP):** multiple tight clouds on-curve, messy if aggregated.
-- **Weekly rollups:** toggles by epoch; U-shaped KPIs tied to recipe/ambient.
+Operating pattern:
+- 2–4 batches/day; each batch runs 2–6 hours.
+- During a batch, control targets `Q_set ∈ {65, 80, 95}` m³/h by recipe.
+- Off‑shift idle with near‑zero flow/current and small noise.
 
 ---
 
-## Data schema
+## Recognition Guide (matches simulator behavior)
+
+### 1) Cavitation
+Narrative: Poor suction (plugged strainer, vapor bubbles) causes efficiency loss, noisier head, and intermittent flow dips.
+
+Visual cues:
+- Suction drift: `Ps_kPa` trends downward after ≈ day 18–26. Over ~4–6 weeks, median becomes ≈ 8–15% more negative vs. pre‑event baseline.
+- Noisier head: `dP_kPa` variance increases; p95–p05 band ≈ 1.5–2.0× baseline, especially during active hours.
+- Intermittent events: 5–15‑minute flow dips of 5–12% at unchanged `Q_set`, accompanied by `I_A` spikes of ≈ 8–15%.
+- Chronic effect: modest flow fade accumulating to ≈ 1–3% by late period. Total head decline bounded to ≈ 8–15% from pre‑cavitation baseline (not runaway).
+
+Operating map (Q vs dP):
+- Cloud shifts left/down and becomes wider; noticeably higher vertical spread at a given Q.
+
+KPIs to validate:
+- Weekly median `Ps_kPa` more negative; weekly var(`dP_kPa`) ≈ 1.5–2.0× baseline.
+- `I_A / (Q · dP)` increases ≈ 10–20% vs. baseline.
+
+### 2) Impeller Wear (Hydraulic Efficiency Loss)
+Narrative: Smooth, monotonic loss of hydraulic head/efficiency with stable variance.
+
+Visual cues:
+- Suction stable: `Ps_kPa` ≈ flat.
+- Head decline: `dP_kPa` decreases 5–20% over the full 90‑day window; approximate linear trend; variance ~unchanged.
+- Load/flow coupling (two modes simulated):
+  - Flow fades ≈ 2–8% with a smaller `I_A` creep ≈ 2–6%; or
+  - Flow ≈ steady while `I_A` creeps ≈ 5–10%.
+
+Operating map (Q vs dP):
+- Cloud shifts downward roughly parallel to the OEM curve, with similar spread.
+
+KPIs to validate:
+- Weekly `dP` at `Q_set` declines steadily; efficiency proxy falls ≈ 10–25% by day 90.
+
+### 3) Healthy (False Positive — Process/Control)
+Narrative: Apparent anomalies come from recipe/ambient changes; behavior reverts when the recipe returns.
+
+Visual cues:
+- Epochal shifts: 7–14‑day epochs with `Q_set` steps of ±5–10% and corresponding `dP` shifts of ±3–6%.
+- Reversibility: When the recipe toggles back, values revert; no monotonic long‑term decline.
+- Attribution: Stratifying by `recipe` collapses efficiency and ratios back to on‑curve, distinguishing from true faults.
+
+Operating map (Q vs dP):
+- Multiple tight clouds on the OEM curve; aggregated view appears messy if not stratified by recipe.
+
+KPIs to validate:
+- KPIs toggle by epoch and revert; net trend across 90 days remains near baseline when recipes cycle.
+
+---
+
+## Data Schema
+CSV columns emitted by the simulator:
 ```csv
-timestamp_utc, pump_id, batch_id, recipe, Ps_kPa, Pd_kPa, Q_m3h, I_A, dP_kPa, Eff
+timestamp_utc, pump_id, batch_id, recipe, Ps_kPa, Pd_kPa, Q_m3h, I_A
 ```
-- Uniform 5-min spacing (fill idle with Q≈0, small noise).
-- Active/idle inferred from Q.
+- Uniform 5‑minute spacing.
+- Idle periods filled with small noise (typical Q≈0.05 m³/h, I≈0.1 A).
+- Active/idle can be inferred from `Q_m3h` and `batch_id`.
+
+Downstream (pipeline) should compute:
+- `dP_kPa = Pd_kPa − Ps_kPa`
+- `Eff = (Q_m3h · dP_kPa) / I_A`
 
 ---
 
-## Simulation recipe
+## Simulation Recipe (high‑level)
 
-### Global constants
-- OEM band: dP_expected(Q) = a − bQ − cQ².
-- Baseline ranges:
-  - Q_set ∈ {65, 80, 95} m³/h.
-  - Baseline dP_expected(Q_set) ≈ 250–300 kPa.
-  - Ps_active ≈ −5 to +5 kPa.
-  - I_A tuned so Eff ≈ 0.9–1.1.
+OEM curve:
+- `dP_expected(Q) = a − b·Q − c·Q²` (quadratic head‑flow relation).
 
-### Steps
-1. Generate calendar: 90 days × 5-min, with 2–4 batches/day.
-2. Baseline (Healthy):
-   - Q_m3h ~ N(Q_set, (0.03·Q_set)²).
-   - dP ~ dP_expected(Q) + ε, ε ~ N(0, σ²) with σ ≈ 1–2% of expected.
-   - Ps ~ 0 ± 2; Pd = dP + Ps.
-   - I_A set to yield Eff ~ 0.95–1.05.
-   - Idle: Q≈0, dP≈0, I≈0 (small noise).
-3. Overlay per class:
-   - **Cavitation:** start day ~20, Ps drift −0.2 to −0.5 kPa/day, dP variance ×1.5–2.0, occasional Q dips (−5–10%) with I spikes (+8–15%).
-   - **Impeller Wear:** dP decline 5–20% over 90d (linear), variance steady, I_A increase 5–10% (or Q drop 2–10%).
-   - **Healthy:** create epochs (7–14 days) with Q_set ±5–10%, dP shift +3–6%, revert after epoch.
-4. Rollups: compute min/max/p05/p95 within windows if needed.
-5. Labels: class ∈ {CAVITATION, IMPELLER_WEAR, HEALTHY_FP} per pump or period.
+Baseline (healthy):
+- Batch schedule: 2–4/day, 2–6 h each, `Q_set ∈ {65, 80, 95}` m³/h.
+- Active flow: `Q_m3h ~ N(Q_set, (0.03·Q_set)²)`; head noise ≈ 1–2% of expected.
+- Suction: `Ps_kPa` ≈ 0 ± 2 kPa active; idle near 0 with tighter noise.
+- Current: chosen so downstream `Eff` centers ≈ 1.0 during active periods; idle current near zero.
+
+Class overlays (key parameters):
+- Cavitation (starts ≈ day 18–26): variance factor ×1.5–2.0; bounded head decline ≈ 8–15%; chronic flow fade ≈ 1–3%; intermittent 5–12% Q dips lasting 5–15 minutes with 8–15% `I_A` spikes; suction drifts more negative over weeks.
+- Impeller Wear: head declines 5–20% over 90 days with steady variance; either flow fades 2–8% with 2–6% current creep, or flow steady with 5–10% current creep.
+- Healthy (FP): epochs 7–14 days; `Q_set` ±5–10%, `dP` ±3–6%; `recipe` updated for epoch; behavior reverts when recipe returns.
+
+Labels per pump:
+- `class ∈ {CAVITATION, IMPELLER_WEAR, HEALTHY_FP}`, with `class_start_utc` and `class_end_utc` bounding the simulation window.
 
 ---
 
-## Label schema
-```csv
-pump_id, class, class_start_utc, class_end_utc
-```
+## Sanity Checks (quick validation)
+- Cavitation: median `Ps_kPa` more negative by ≈ 8–15% from pre‑event; var(`dP_kPa`) ≈ 1.5–2.0× baseline; intermittent Q dips with I spikes present.
+- Impeller Wear: `dP` at `Q_set` ↓ 5–20% over 90 days; variance ~unchanged; current/flow creep matches one of the two modes.
+- Healthy: epoch‑wise shifts visible and reversible; stratification by `recipe` normalizes KPIs; by day 90, overall trend near baseline when recipes cycle.
 
----
-
-## Sanity checks
-- **Cavitation:** Ps median ↓ 8–15% by day 60; var(dP) 1.5–2.0× baseline.
-- **Impeller Wear:** dP@Q_set ↓ 5–20% over 90 days; variance ~1.0.
-- **Healthy:** per-epoch shifts but overall return to baseline by day 90.
